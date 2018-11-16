@@ -1,4 +1,6 @@
 require 'activemodel-serializers-xml'
+require 'csv'
+require 'json'
 
 module RailsAdmin
   module Config
@@ -73,13 +75,29 @@ module RailsAdmin
               end
 
               format.csv do
-                header, encoding, output = CSVConverter.new(@objects, @schema).to_csv(params[:csv_options].permit!.to_h)
+                output = begin
+                  if params[:compact]
+                    primary_key_method = @association ? @association.associated_primary_key : @model_config.abstract_model.primary_key
+                    label_method = @model_config.object_label_method
+                    @objects.collect { |o| {id: o.send(primary_key_method).to_s, label: o.send(label_method).to_s} }
+                  else
+                    @objects.to_json(@schema)
+                  end
+                end
+                
+                csv_string = CSV.generate do |csv|
+                  JSON.parse(output).each_with_index do |hash, i|
+                    if i == 0
+                      csv << hash.keys
+                    end
+                    csv << hash.values
+                  end
+                end
+                
                 if params[:send_data]
-                  send_data output,
-                            type: "text/csv; charset=#{encoding}; #{'header=present' if header}",
-                            disposition: "attachment; filename=#{params[:model_name]}_#{DateTime.now.strftime('%Y-%m-%d_%Hh%Mm%S')}.csv"
+                  send_data csv_string, type: "text/csv;", filename: "#{params[:model_name]}_#{DateTime.now.strftime('%Y-%m-%d_%Hh%Mm%S')}.csv"
                 else
-                  render plain: output
+                  render plain: csv_string
                 end
               end
             end
